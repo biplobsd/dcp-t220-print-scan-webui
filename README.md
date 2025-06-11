@@ -125,6 +125,13 @@ cd dcp-t220-print-scan-webui
 # Install project dependencies
 npm install
 
+# **IMPORTANT: Configure Environment Variables**
+# Create environment file from example
+cp .env.example .env.local
+
+# Edit the environment file with your specific configuration
+nano .env.local
+
 # Build the project
 npm run build
 ```
