@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { exec } from "child_process";
 import { promisify } from "util";
 
+import type { ExecException } from 'child_process';
 const execAsync = promisify(exec);
 
 export async function POST(request: NextRequest) {
@@ -50,27 +51,35 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
+    const getServiceStatus = async (serviceName: string) => {
+      try {
+        const { stdout } = await execAsync(
+          `sudo systemctl is-active ${serviceName}`
+        );
+        return stdout.trim();
+      } catch (error) {
+        const errorTyped = error as { stdout?: string; stderr?: string };
+        if (errorTyped.stdout) {
+          return errorTyped.stdout.trim();
+        }
+        return "unknown";
+      }
+    };
+
     // Check VirtualHere service status
-    const { stdout, stderr } = await execAsync(
-      "sudo systemctl is-active virtualhere.service"
-    );
-    const vhStatus = stdout + stderr;
+    const vhStatus = await getServiceStatus("virtualhere.service");
 
     // Check IPP-USB service status
-    const { stdout: ippStdout, stderr: ippStderr } = await execAsync(
-      "sudo systemctl is-active ipp-usb.service"
-    );
-
-    const ippStatus = ippStdout + ippStderr;
+    const ippStatus = await getServiceStatus("ipp-usb.service");
 
     return NextResponse.json({
       virtualhere: {
-        status: vhStatus.trim(),
-        isActive: vhStatus.trim() === "active"
+        status: vhStatus,
+        isActive: vhStatus === "active"
       },
       ippUsb: {
-        status: ippStatus.trim(),
-        isActive: ippStatus.trim() === "active"
+        status: ippStatus,
+        isActive: ippStatus === "active"
       }
     });
   } catch (error) {
