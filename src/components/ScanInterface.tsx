@@ -18,7 +18,6 @@ export default function ScanInterface() {
   const [scanProgress, setScanProgress] = useState(0);
   const [scanEstimatedTime, setScanEstimatedTime] = useState<number | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
   const [isPreviewDownloading, setIsPreviewDownloading] = useState(false);
   const [isPreviewGenerating, setIsPreviewGenerating] = useState<string | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<string | null>(null);
