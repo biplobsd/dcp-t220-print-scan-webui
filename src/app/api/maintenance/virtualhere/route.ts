@@ -51,14 +51,17 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   try {
     // Check VirtualHere service status
-    const { stdout: vhStatus } = await execAsync(
+    const { stdout, stderr } = await execAsync(
       "sudo systemctl is-active virtualhere.service"
     );
+    const vhStatus = stdout + stderr;
 
     // Check IPP-USB service status
-    const { stdout: ippStatus } = await execAsync(
+    const { stdout: ippStdout, stderr: ippStderr } = await execAsync(
       "sudo systemctl is-active ipp-usb.service"
     );
+
+    const ippStatus = ippStdout + ippStderr;
 
     return NextResponse.json({
       virtualhere: {

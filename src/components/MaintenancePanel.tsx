@@ -503,12 +503,10 @@ export default function MaintenancePanel() {
                 onClick={() => manageVirtualHereService("start")}
                 disabled={
                   isManagingVirtualHere ||
-                  printerStatus.status !== "idle" ||
                   virtualHereStatus?.virtualhere.isActive
                 }
                 className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
                   isManagingVirtualHere ||
-                  printerStatus.status !== "idle" ||
                   virtualHereStatus?.virtualhere.isActive
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl"
@@ -528,12 +526,10 @@ export default function MaintenancePanel() {
                 onClick={() => manageVirtualHereService("stop")}
                 disabled={
                   isManagingVirtualHere ||
-                  printerStatus.status !== "idle" ||
                   !virtualHereStatus?.virtualhere.isActive
                 }
                 className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
                   isManagingVirtualHere ||
-                  printerStatus.status !== "idle" ||
                   !virtualHereStatus?.virtualhere.isActive
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                     : "bg-red-600 hover:bg-red-700 text-white shadow-lg hover:shadow-xl"
