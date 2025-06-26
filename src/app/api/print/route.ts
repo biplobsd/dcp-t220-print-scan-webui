@@ -54,11 +54,17 @@ export async function POST(request: NextRequest) {
     ) as PrintSettings;
 
     if (!file) {
+      console.error("No file provided in the request");
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
     tempDir = await mkdtempAsync(path.join(os.tmpdir(), "print-"));
-    tempFilePath = path.join(tempDir, file.name);
+    const sanitizedFileName = file.name
+        .replace(/\s+/g, '_')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+
+    tempFilePath = path.join(tempDir, sanitizedFileName);
 
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     await writeFileAsync(tempFilePath, fileBuffer);
@@ -95,7 +101,7 @@ export async function POST(request: NextRequest) {
       settings.type === "photo" ? "photographic-glossy" : "stationery";
     lpArgs.push("-o", `media-type=${mediaType}`);
 
-    lpArgs.push("-t", `"${file.name}"`);
+    lpArgs.push("-t", `"${sanitizedFileName}"`);
 
     lpArgs.push(tempFilePath);
 
