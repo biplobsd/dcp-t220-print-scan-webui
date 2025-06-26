@@ -15,8 +15,12 @@ export default function ScanInterface() {
   });
   const [scannedPages, setScannedPages] = useState<ScanPage[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [scanEstimatedTime, setScanEstimatedTime] = useState<number | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const [isPreviewDownloading, setIsPreviewDownloading] = useState(false);
+  const [isPreviewGenerating, setIsPreviewGenerating] = useState<string | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] =
     useState<ScanSettings["format"]>("pdf");
@@ -26,6 +30,18 @@ export default function ScanInterface() {
     if (printerStatus.status !== "idle" || isScanning) return;
 
     setIsScanning(true);
+    setScanProgress(0);
+
+    // Estimate scanning time based on quality and color settings
+    const getEstimatedTime = () => {
+      let baseTime = 15; // Base 15 seconds for normal scan
+      if (scanSettings.quality === "high") baseTime += 10;
+      if (scanSettings.quality === "draft") baseTime -= 5;
+      if (scanSettings.color === "color") baseTime += 5;
+      return Math.max(baseTime, 8); // Minimum 8 seconds
+    };
+
+    setScanEstimatedTime(getEstimatedTime());
 
     try {
       const response = await fetch("/api/scan", {
@@ -48,11 +64,21 @@ export default function ScanInterface() {
           // Store the current format for this scan
           setSelectedFormat(scanSettings.format);
 
+          // Start progress simulation
+          const progressInterval = setInterval(() => {
+            setScanProgress(prev => {
+              if (prev >= 90) return prev; // Cap at 90% until actual completion
+              return prev + Math.random() * 10;
+            });
+          }, 1000);
+
           // Poll for scan completion
-          await pollScanStatus(scanResult.jobId);
+          await pollScanStatus(scanResult.jobId, progressInterval);
         } else {
           console.error("Scan failed:", scanResult.error);
           setIsScanning(false);
+          setScanProgress(0);
+          setScanEstimatedTime(null);
         }
       } else {
         throw new Error("Failed to start scan");
@@ -60,10 +86,12 @@ export default function ScanInterface() {
     } catch (error) {
       console.error("Scan failed:", error);
       setIsScanning(false);
+      setScanProgress(0);
+      setScanEstimatedTime(null);
     }
   };
 
-  const pollScanStatus = async (jobId: string) => {
+  const pollScanStatus = async (jobId: string, progressInterval?: NodeJS.Timeout) => {
     try {
       const response = await fetch(`/api/scan/status?jobId=${jobId}`);
 
@@ -71,6 +99,12 @@ export default function ScanInterface() {
         const jobStatus: ScanJob = await response.json();
 
         if (jobStatus.status === "completed") {
+          if (progressInterval) clearInterval(progressInterval);
+          setScanProgress(100);
+
+          // Set preview generating state
+          setIsPreviewGenerating(jobId);
+
           const newPage: ScanPage = {
             id: jobStatus.jobId,
             preview: jobStatus.previewUrl,
@@ -78,16 +112,27 @@ export default function ScanInterface() {
           };
 
           setScannedPages((prev) => [...prev, newPage]);
-          setIsScanning(false);
+
+          // Simulate preview generation delay
+          setTimeout(() => {
+            setIsPreviewGenerating(null);
+            setIsScanning(false);
+            setScanProgress(0);
+            setScanEstimatedTime(null);
+          }, 1500);
         } else {
-          setTimeout(() => pollScanStatus(jobId), 1000);
+          setTimeout(() => pollScanStatus(jobId, progressInterval), 1000);
         }
       } else {
         throw new Error("Failed to get scan status");
       }
     } catch (error) {
       console.error("Status polling failed:", error);
+      if (progressInterval) clearInterval(progressInterval);
       setIsScanning(false);
+      setScanProgress(0);
+      setScanEstimatedTime(null);
+      setIsPreviewGenerating(null);
     }
   };
 
@@ -277,10 +322,85 @@ export default function ScanInterface() {
         }`}
       >
         <div className="flex items-center justify-center">
-          <Scan className="mr-2" size={20} />
-          {isScanning ? "Scanning..." : "Start Scan"}
+          {isScanning ? (
+            <>
+              <svg
+                className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              {isPreviewGenerating ? "Generating Preview..." : "Scanning..."}
+            </>
+          ) : (
+            <>
+              <Scan className="mr-2" size={20} />
+              Start Scan
+            </>
+          )}
         </div>
       </button>
+
+      {/* Scanning Progress Indicator */}
+      {isScanning && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {isPreviewGenerating ? "Generating Preview" : "Scanning Document"}
+              </h3>
+              <span className="text-sm text-gray-600">
+                {Math.round(scanProgress)}%
+              </span>
+            </div>
+
+            <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+              <div
+                className="bg-green-600 h-2 rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${scanProgress}%` }}
+              ></div>
+            </div>
+
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>
+                {isPreviewGenerating
+                  ? "Processing scan data..."
+                  : `Scanning at ${scanSettings.quality} quality (${scanSettings.color})`
+                }
+              </span>
+              {scanEstimatedTime && !isPreviewGenerating && (
+                <span>
+                  Est. {scanEstimatedTime}s
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="text-center">
+            <div className="inline-flex items-center text-sm text-gray-500">
+              <div className="animate-pulse mr-2">●</div>
+              {isPreviewGenerating
+                ? "Almost done! Creating preview image..."
+                : "Please keep the document steady on the scanner bed"
+              }
+            </div>
+          </div>
+        </div>
+      )}
 
       {scannedPages.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
@@ -303,18 +423,38 @@ export default function ScanInterface() {
                   previewUrl={page.preview}
                   format={selectedFormat}
                   pageNumber={index + 1}
+                  isGenerating={isPreviewGenerating === page.id}
                 />
+                {/* Show generating overlay for the specific page */}
+                {isPreviewGenerating === page.id && (
+                  <div className="absolute inset-0 bg-white bg-opacity-90 rounded-lg flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                      <div className="text-xs text-gray-600">Creating preview...</div>
+                    </div>
+                  </div>
+                )}
                 <div className="absolute top-2 right-2 flex space-x-1">
                   <button
                     onClick={() => handlePreview(page.preview)}
-                    className="p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
+                    disabled={isPreviewGenerating === page.id}
+                    className={`p-1 bg-white rounded-full shadow-md transition-colors ${
+                      isPreviewGenerating === page.id 
+                        ? "opacity-50 cursor-not-allowed" 
+                        : "hover:bg-gray-100"
+                    }`}
                     title="Preview"
                   >
                     <Eye size={16} className="text-gray-600" />
                   </button>
                   <button
                     onClick={() => handleRemovePage(page.id)}
-                    className="p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
+                    disabled={isPreviewGenerating === page.id}
+                    className={`p-1 bg-white rounded-full shadow-md transition-colors ${
+                      isPreviewGenerating === page.id 
+                        ? "opacity-50 cursor-not-allowed" 
+                        : "hover:bg-gray-100"
+                    }`}
                     title="Remove"
                   >
                     <Trash2 size={16} className="text-red-600" />
