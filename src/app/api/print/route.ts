@@ -22,12 +22,6 @@ const MEDIA_SIZE_MAP: Record<string, string> = {
   photo5x7: "na_5x7_5x7in",
 };
 
-const QUALITY_MAP: Record<string, string> = {
-  draft: "3",
-  normal: "4",
-  high: "5",
-};
-
 const COLOR_MAP: Record<string, string> = {
   color: "color",
   bw: "monochrome",
@@ -79,8 +73,8 @@ export async function POST(request: NextRequest) {
       lpArgs.push("-n", settings.copies.toString());
     }
 
-    if (settings.quality && QUALITY_MAP[settings.quality]) {
-      lpArgs.push("-o", `print-quality=${QUALITY_MAP[settings.quality]}`);
+    if (settings.quality && settings.quality) {
+      lpArgs.push("-o", `print-quality=${settings.quality}`);
     }
 
     if (settings.color && COLOR_MAP[settings.color]) {
@@ -88,7 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (settings.orientation && settings.orientation === "landscape") {
-      lpArgs.push("-o", "orientation-requested=4");
+      lpArgs.push("-o", "orientation-requested=landscape");
     }
 
     if (settings.mediaSize && MEDIA_SIZE_MAP[settings.mediaSize]) {
