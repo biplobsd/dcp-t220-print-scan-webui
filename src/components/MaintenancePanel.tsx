@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Droplets,
   AlertTriangle,
@@ -10,6 +10,10 @@ import {
   Info,
   Clock,
   Zap,
+  Server,
+  Play,
+  Square,
+  Wifi,
 } from "lucide-react";
 
 import { usePrinter } from "@/contexts/PrinterContext";
@@ -20,6 +24,17 @@ import {
   MaintenanceResult,
 } from "@/types/maintenance";
 
+interface VirtualHereStatus {
+  virtualhere: {
+    status: string;
+    isActive: boolean;
+  };
+  ippUsb: {
+    status: string;
+    isActive: boolean;
+  };
+}
+
 export default function MaintenancePanel() {
   const [isRunningMaintenance, setIsRunningMaintenance] =
     useState<boolean>(false);
@@ -28,6 +43,9 @@ export default function MaintenancePanel() {
   const [selectedCleaningType, setSelectedCleaningType] =
     useState<CleaningType>(CleaningType.ALL_NORMAL);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const [isManagingVirtualHere, setIsManagingVirtualHere] = useState<boolean>(false);
+  const [virtualHereStatus, setVirtualHereStatus] = useState<VirtualHereStatus | null>(null);
+  const [virtualHereResult, setVirtualHereResult] = useState<MaintenanceResult | null>(null);
   const { printerStatus, updateStatus } = usePrinter();
 
   const cleaningOptions: CleaningOption[] = [
@@ -203,6 +221,83 @@ export default function MaintenancePanel() {
 
   const categories = getOptionsByCategory();
 
+  // Fetch VirtualHere status on component mount
+  useEffect(() => {
+    fetchVirtualHereStatus();
+  }, []);
+
+  const fetchVirtualHereStatus = async (): Promise<void> => {
+    try {
+      const response = await fetch("/api/maintenance/virtualhere");
+      if (response.ok) {
+        const status = await response.json();
+        setVirtualHereStatus(status);
+      }
+    } catch (error) {
+      console.error("Failed to fetch VirtualHere status:", error);
+    }
+  };
+
+  const manageVirtualHereService = async (action: "start" | "stop"): Promise<void> => {
+    const actionText = action === "start" ? "starting" : "stopping";
+
+    if (
+      !confirm(
+        `Are you sure you want to ${action} the VirtualHere service?${
+          action === "stop" ? " This will also restart the IPP-USB service." : ""
+        }`
+      )
+    ) {
+      return;
+    }
+
+    setIsManagingVirtualHere(true);
+    setVirtualHereResult(null);
+
+    try {
+      updateStatus({
+        status: "maintenance",
+        message: `${actionText.charAt(0).toUpperCase() + actionText.slice(1)} VirtualHere service...`,
+      });
+
+      const response = await fetch("/api/maintenance/virtualhere", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setVirtualHereResult({
+          success: true,
+          message: result.message,
+          timestamp: new Date(),
+        });
+        updateStatus({ status: "idle", message: "Printer ready" });
+
+        // Refresh status after action
+        setTimeout(() => {
+          fetchVirtualHereStatus();
+        }, 1000);
+      } else {
+        const errorData: { error: string } = await response.json();
+        throw new Error(errorData.error || `Failed to ${action} VirtualHere service`);
+      }
+    } catch (error) {
+      console.error(`VirtualHere service ${action} failed:`, error);
+      setVirtualHereResult({
+        success: false,
+        message: `VirtualHere service ${action} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        timestamp: new Date(),
+      });
+      updateStatus({ status: "error", message: "Service management failed" });
+    } finally {
+      setIsManagingVirtualHere(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="p-4 max-w-md mx-auto">
@@ -284,6 +379,190 @@ export default function MaintenancePanel() {
           </div>
         )}
 
+        {/* VirtualHere Service Management Section */}
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-6">
+          <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-4">
+            <h2 className="text-xl font-semibold text-white flex items-center">
+              <Server className="mr-2" size={24} />
+              VirtualHere Service
+            </h2>
+            <p className="text-purple-100 mt-1">
+              Manage USB over network sharing service
+            </p>
+          </div>
+
+          <div className="p-6">
+            {virtualHereResult && (
+              <div
+                className={`p-4 rounded-lg mb-4 ${
+                  virtualHereResult.success
+                    ? "bg-green-50 border-l-4 border-green-400"
+                    : "bg-red-50 border-l-4 border-red-400"
+                }`}
+              >
+                <div className="flex items-center">
+                  {virtualHereResult.success ? (
+                    <CheckCircle className="text-green-500 mr-3" size={20} />
+                  ) : (
+                    <AlertTriangle className="text-red-500 mr-3" size={20} />
+                  )}
+                  <div>
+                    <p
+                      className={`font-medium text-sm ${
+                        virtualHereResult.success
+                          ? "text-green-800"
+                          : "text-red-800"
+                      }`}
+                    >
+                      {virtualHereResult.message}
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {virtualHereResult.timestamp.toLocaleTimeString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {virtualHereStatus && (
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <h4 className="font-semibold text-gray-800 mb-3">Service Status</h4>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-700 flex items-center">
+                      <Server className="mr-2" size={16} />
+                      VirtualHere
+                    </span>
+                    <div className="flex items-center">
+                      <div
+                        className={`w-3 h-3 rounded-full mr-2 ${
+                          virtualHereStatus.virtualhere.isActive
+                            ? "bg-green-500"
+                            : "bg-red-500"
+                        }`}
+                      ></div>
+                      <span
+                        className={`text-sm font-medium ${
+                          virtualHereStatus.virtualhere.isActive
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {virtualHereStatus.virtualhere.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-700 flex items-center">
+                      <Wifi className="mr-2" size={16} />
+                      IPP-USB
+                    </span>
+                    <div className="flex items-center">
+                      <div
+                        className={`w-3 h-3 rounded-full mr-2 ${
+                          virtualHereStatus.ippUsb.isActive
+                            ? "bg-green-500"
+                            : "bg-red-500"
+                        }`}
+                      ></div>
+                      <span
+                        className={`text-sm font-medium ${
+                          virtualHereStatus.ippUsb.isActive
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {virtualHereStatus.ippUsb.status}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+              <div className="flex items-start">
+                <Info
+                  className="text-amber-500 mr-3 flex-shrink-0 mt-0.5"
+                  size={20}
+                />
+                <div>
+                  <h4 className="font-medium text-amber-900 mb-1">
+                    Important Note
+                  </h4>
+                  <p className="text-sm text-amber-800">
+                    Starting VirtualHere will stop IPP-USB. When stopping VirtualHere,
+                    IPP-USB will be automatically restarted to restore local printer access.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex space-x-3">
+              <button
+                onClick={() => manageVirtualHereService("start")}
+                disabled={
+                  isManagingVirtualHere ||
+                  printerStatus.status !== "idle" ||
+                  virtualHereStatus?.virtualhere.isActive
+                }
+                className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
+                  isManagingVirtualHere ||
+                  printerStatus.status !== "idle" ||
+                  virtualHereStatus?.virtualhere.isActive
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl"
+                }`}
+              >
+                {isManagingVirtualHere ? (
+                  <div className="animate-spin mr-2">
+                    <Settings size={16} />
+                  </div>
+                ) : (
+                  <Play className="mr-2" size={16} />
+                )}
+                Start Service
+              </button>
+
+              <button
+                onClick={() => manageVirtualHereService("stop")}
+                disabled={
+                  isManagingVirtualHere ||
+                  printerStatus.status !== "idle" ||
+                  !virtualHereStatus?.virtualhere.isActive
+                }
+                className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
+                  isManagingVirtualHere ||
+                  printerStatus.status !== "idle" ||
+                  !virtualHereStatus?.virtualhere.isActive
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-red-600 hover:bg-red-700 text-white shadow-lg hover:shadow-xl"
+                }`}
+              >
+                {isManagingVirtualHere ? (
+                  <div className="animate-spin mr-2">
+                    <Settings size={16} />
+                  </div>
+                ) : (
+                  <Square className="mr-2" size={16} />
+                )}
+                Stop Service
+              </button>
+            </div>
+
+            {printerStatus.status !== "idle" && !isManagingVirtualHere && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-700 text-center">
+                  <AlertTriangle className="inline mr-1" size={16} />
+                  Printer must be idle to manage services. Current status:{" "}
+                  <span className="font-medium">{printerStatus.status}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Existing Print Head Cleaning Section */}
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
             <h2 className="text-xl font-semibold text-white flex items-center">
