@@ -16,17 +16,18 @@
     "axios": "^1.9.0",
     "clsx": "^2.1.1",
     "ipp": "^2.0.1",
+    "jiti": "^1.21.7",
     "lucide-react": "^0.513.0",
     "next": "15.3.3",
     "next-themes": "^0.4.6",
+    "pdf-lib": "^1.17.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-dropzone": "^14.3.8",
     "sonner": "^2.0.5",
     "tailwind-merge": "^3.3.0",
     "uuid": "^11.1.0",
-    "zod": "^3.25.56",
-    "jiti": "^1.21.7"
+    "zod": "^3.25.56"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",

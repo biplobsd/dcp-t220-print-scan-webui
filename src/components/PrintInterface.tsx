@@ -8,9 +8,12 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  Eye,
 } from "lucide-react";
 import { usePrinter } from "@/contexts/PrinterContextForPrint";
 import FileUpload from "@/components/FileUpload";
+import PdfPreview from "@/components/PdfPreview";
+import { PDFDocument } from 'pdf-lib';
 
 export default function PrintInterface() {
   const [printSettings, setPrintSettings] = useState({
@@ -20,32 +23,190 @@ export default function PrintInterface() {
     type: "document",
     mediaSize: "a4",
     orientation: "portrait",
+    // PDF-specific options
+    pageSelection: "all" as "all" | "odd" | "even" | "range",
+    pageRange: "",
+    reversePages: false,
   });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [processedFile, setProcessedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isProcessingPdf, setIsProcessingPdf] = useState(false);
   const [printResult, setPrintResult] = useState<{
     success?: boolean;
     message?: string;
     jobId?: string;
   } | null>(null);
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
 
   const { addJob, printerStatus, activeJobId, jobs } = usePrinter();
 
   useEffect(() => {
     if (selectedFile) {
       setPrintResult(null);
+      setProcessedFile(null);
     }
   }, [selectedFile]);
 
+  // Process PDF when page selection changes
+  useEffect(() => {
+    if (selectedFile && isPdfFile) {
+      processPdfOnClient();
+    }
+  }, [selectedFile, printSettings.pageSelection, printSettings.pageRange, printSettings.reversePages]);
+
+  const isPdfFile = selectedFile?.type === "application/pdf" || selectedFile?.name.toLowerCase().endsWith('.pdf');
+
+  const parsePageRange = (range: string): number[] => {
+    if (!range.trim()) return [];
+
+    const pages: number[] = [];
+    const parts = range.split(',').map(p => p.trim());
+
+    for (const part of parts) {
+      if (part.includes('-')) {
+        const [start, end] = part.split('-').map(p => parseInt(p.trim()));
+        if (!isNaN(start) && !isNaN(end)) {
+          for (let i = start; i <= end; i++) {
+            if (i > 0) pages.push(i);
+          }
+        }
+      } else {
+        const page = parseInt(part);
+        if (!isNaN(page) && page > 0) {
+          pages.push(page);
+        }
+      }
+    }
+
+    return [...new Set(pages)].sort((a, b) => a - b);
+  };
+
+  const getPageIndices = async (pdfDoc: PDFDocument): Promise<number[]> => {
+    const totalPageCount = pdfDoc.getPageCount();
+
+    switch (printSettings.pageSelection) {
+      case "all":
+        return Array.from({ length: totalPageCount }, (_, i) => i);
+
+      case "odd":
+        return Array.from({ length: totalPageCount }, (_, i) => i)
+          .filter(i => (i + 1) % 2 === 1);
+
+      case "even":
+        return Array.from({ length: totalPageCount }, (_, i) => i)
+          .filter(i => (i + 1) % 2 === 0);
+
+      case "range":
+        const pageNumbers = parsePageRange(printSettings.pageRange);
+        return pageNumbers
+          .filter(pageNum => pageNum <= totalPageCount)
+          .map(pageNum => pageNum - 1); // Convert to 0-based index
+
+      default:
+        return Array.from({ length: totalPageCount }, (_, i) => i);
+    }
+  };
+
+  const processPdfOnClient = async () => {
+    if (!selectedFile || !isPdfFile) {
+      setProcessedFile(null);
+      return;
+    }
+
+    // If it's "all" pages and no reverse, use original file
+    if (printSettings.pageSelection === "all" && !printSettings.reversePages) {
+      setProcessedFile(selectedFile);
+      return;
+    }
+
+    if (printSettings.pageSelection === "range" && !validatePageRange(printSettings.pageRange)) {
+      setProcessedFile(null);
+      return;
+    }
+
+    try {
+      setIsProcessingPdf(true);
+
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+
+      let pageIndices = await getPageIndices(pdfDoc);
+
+      if (pageIndices.length === 0) {
+        setProcessedFile(null);
+        return;
+      }
+
+      // Apply reverse order if requested
+      if (printSettings.reversePages) {
+        pageIndices = pageIndices.reverse();
+      }
+
+      // Create a new PDF with the selected/ordered pages
+      const newPdfDoc = await PDFDocument.create();
+
+      // Copy pages to new document in the specified order
+      const copiedPages = await newPdfDoc.copyPages(pdfDoc, pageIndices);
+      copiedPages.forEach(page => newPdfDoc.addPage(page));
+
+      // Generate the processed PDF
+      const pdfBytes = await newPdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const processedFileName = `processed_${selectedFile.name}`;
+      const newFile = new File([blob], processedFileName, { type: 'application/pdf' });
+
+      setProcessedFile(newFile);
+
+    } catch (err) {
+      console.error('Error processing PDF on client:', err);
+      setProcessedFile(null);
+    } finally {
+      setIsProcessingPdf(false);
+    }
+  };
+
+  const validatePageRange = (range: string): boolean => {
+    if (!range.trim()) return false;
+
+    const parts = range.split(',').map(p => p.trim());
+    for (const part of parts) {
+      if (part.includes('-')) {
+        const [start, end] = part.split('-').map(p => parseInt(p.trim()));
+        if (isNaN(start) || isNaN(end) || start < 1 || end < start) {
+          return false;
+        }
+      } else {
+        const page = parseInt(part);
+        if (isNaN(page) || page < 1) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
   const handlePrint = async () => {
     if (!selectedFile) return;
+
+    // Use processed file if available, otherwise use original file
+    const fileToSend = (isPdfFile && processedFile) ? processedFile : selectedFile;
+
     setIsSubmitting(true);
     setPrintResult(null);
 
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("settings", JSON.stringify(printSettings));
+      formData.append("file", fileToSend);
+
+      // Remove PDF-specific settings since we're sending processed file
+      const settingsToSend = {
+        ...printSettings,
+        pageSelection: "all", // Always "all" since we've already processed
+        pageRange: ""
+      };
+
+      formData.append("settings", JSON.stringify(settingsToSend));
 
       const response = await fetch("/api/print", {
         method: "POST",
@@ -124,6 +285,40 @@ export default function PrintInterface() {
     { value: "photo4x6", label: "Photo 4×6" },
     { value: "photo5x7", label: "Photo 5×7" },
   ];
+
+  const getPageSelectionDescription = () => {
+    if (!isPdfFile || !selectedFile) return "";
+
+    let baseDescription = "";
+    switch (printSettings.pageSelection) {
+      case "all":
+        baseDescription = "All pages will be printed";
+        break;
+      case "odd":
+        baseDescription = "Only odd pages will be printed";
+        break;
+      case "even":
+        baseDescription = "Only even pages will be printed";
+        break;
+      case "range":
+        if (printSettings.pageRange && validatePageRange(printSettings.pageRange)) {
+          const pages = parsePageRange(printSettings.pageRange);
+          baseDescription = `Pages ${pages.join(", ")} will be printed (${pages.length} page${pages.length !== 1 ? 's' : ''})`;
+        } else {
+          return "Enter a valid page range";
+        }
+        break;
+      default:
+        return "";
+    }
+
+    // Add reverse information if enabled
+    if (printSettings.reversePages) {
+      baseDescription += " in reverse order";
+    }
+
+    return baseDescription;
+  };
 
   return (
     <div className="p-4 max-w-md mx-auto">
@@ -376,6 +571,126 @@ export default function PrintInterface() {
               </button>
             </div>
           </div>
+
+          {/* PDF-specific options */}
+          {isPdfFile && (
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Page Selection
+              </label>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { value: "all", label: "All Pages" },
+                    { value: "odd", label: "Odd Pages Only" },
+                    { value: "even", label: "Even Pages Only" },
+                    { value: "range", label: "Page Range" },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() =>
+                        setPrintSettings((prev) => ({
+                          ...prev,
+                          pageSelection: option.value as never,
+                          pageRange: option.value !== "range" ? "" : prev.pageRange,
+                        }))
+                      }
+                      className={`p-3 rounded-lg border-2 transition-all text-sm ${
+                        printSettings.pageSelection === option.value
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-gray-200 hover:border-gray-300 text-gray-700"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                {printSettings.pageSelection === "range" && (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="e.g., 1, 3-5, 7"
+                      value={printSettings.pageRange}
+                      onChange={(e) =>
+                        setPrintSettings((prev) => ({
+                          ...prev,
+                          pageRange: e.target.value,
+                        }))
+                      }
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-500"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Enter page numbers separated by commas. Use ranges like `1-3` for consecutive pages.
+                    </p>
+                    {printSettings.pageRange && !validatePageRange(printSettings.pageRange) && (
+                      <p className="text-xs text-red-500">
+                        Invalid page range format. Use numbers, commas, and dashes only.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Reverse Pages Option */}
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Reverse Page Order</label>
+                    <p className="text-xs text-gray-500">Print pages in reverse order (last page first)</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPrintSettings((prev) => ({
+                        ...prev,
+                        reversePages: !prev.reversePages,
+                      }))
+                    }
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      printSettings.reversePages
+                        ? "bg-blue-600"
+                        : "bg-gray-200"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        printSettings.reversePages ? "translate-x-6" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Processing indicator */}
+                {isProcessingPdf && (
+                  <div className="p-3 bg-blue-50 rounded-lg flex items-center space-x-2">
+                    <Loader2 className="animate-spin text-blue-600" size={16} />
+                    <span className="text-sm text-blue-700">Processing PDF pages...</span>
+                  </div>
+                )}
+
+                {/* Page selection description */}
+                {!isProcessingPdf && getPageSelectionDescription() && (
+                  <div className="p-3 bg-green-50 rounded-lg">
+                    <p className="text-sm text-green-700">{getPageSelectionDescription()}</p>
+                  </div>
+                )}
+
+                {/* Preview button - available when pages are processed or reverse is enabled */}
+                {!isProcessingPdf && processedFile && (
+                  printSettings.pageSelection !== "all" || printSettings.reversePages
+                ) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPdfPreview(true)}
+                    className="w-full p-3 border border-blue-500 text-blue-600 rounded-lg hover:bg-blue-50 flex items-center justify-center space-x-2"
+                  >
+                    <Eye size={16} />
+                    <span>Preview Pages to Print</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -426,6 +741,16 @@ export default function PrintInterface() {
             )}
           </button>
         </>
+      )}
+
+      {/* PDF Preview Modal */}
+      {showPdfPreview && processedFile && isPdfFile && (
+        <PdfPreview
+          file={processedFile}
+          pageRange={printSettings.pageRange}
+          pageSelection={printSettings.pageSelection}
+          onClose={() => setShowPdfPreview(false)}
+        />
       )}
     </div>
   );
