@@ -1,11 +1,35 @@
 "use client";
 
+import { useState } from "react";
 import { Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { usePrinter } from "@/contexts/PrinterContext";
 import StatusIndicator from "@/components/StatusIndicator";
 
 export default function StatusMonitor() {
   const { printerStatus } = usePrinter();
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
+
+  const handleCancelJob = async (jobId: string) => {
+    if (!confirm(`Are you sure you want to cancel job ${jobId}?`)) return;
+    setCancelingId(jobId);
+    try {
+      const res = await fetch("/api/print/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      });
+      if (res.ok) {
+        alert(`Job ${jobId} cancelled successfully.`);
+      } else {
+        const errData = await res.json();
+        alert(`Failed to cancel job: ${errData.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      alert(`Error cancelling job: ${err}`);
+    } finally {
+      setCancelingId(null);
+    }
+  };
 
   const getJobIcon = (status: string) => {
     switch (status) {
@@ -232,33 +256,44 @@ export default function StatusMonitor() {
             {printerStatus.jobQueue.map((job) => (
               <div
                 key={job.id}
-                className="flex items-center space-x-4 p-4 bg-gray-50 rounded-lg"
+                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
               >
-                {getJobIcon(job.status)}
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium text-gray-900">{job.fileName}</p>
-                    <span
-                      className={`text-sm font-medium capitalize ${getStatusColor(job.status)}`}
-                    >
-                      {job.status}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-600 capitalize">
-                    {job.type} job
-                  </p>
-
-                  {job.status === "processing" && job.progress > 0 && (
-                    <div className="mt-2">
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div
-                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${job.progress}%` }}
-                        />
-                      </div>
+                <div className="flex items-center space-x-4 flex-1">
+                  {getJobIcon(job.status)}
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between pr-4">
+                      <p className="font-medium text-gray-900">{job.fileName}</p>
+                      <span
+                        className={`text-sm font-medium capitalize ${getStatusColor(job.status)}`}
+                      >
+                        {job.status}
+                      </span>
                     </div>
-                  )}
+                    <p className="text-sm text-gray-600 capitalize">
+                      {job.type} job
+                    </p>
+
+                    {job.status === "processing" && job.progress > 0 && (
+                      <div className="mt-2 pr-4">
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${job.progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
+                {(job.status === "pending" || job.status === "processing") && (
+                  <button
+                    onClick={() => handleCancelJob(job.id)}
+                    disabled={cancelingId !== null}
+                    className={`ml-2 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 disabled:opacity-50 rounded-lg text-xs font-semibold transition-all duration-150 shadow-sm border border-red-100`}
+                  >
+                    {cancelingId === job.id ? "..." : "Cancel"}
+                  </button>
+                )}
               </div>
             ))}
           </div>

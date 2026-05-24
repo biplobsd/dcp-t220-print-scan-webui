@@ -14,6 +14,8 @@ import {
   Play,
   Square,
   Wifi,
+  Power,
+  Save,
 } from "lucide-react";
 
 import { usePrinter } from "@/contexts/PrinterContext";
@@ -35,6 +37,14 @@ interface VirtualHereStatus {
   };
 }
 
+interface UsbPowerConfig {
+  enabled: boolean;
+  location: string;
+  port: string;
+  idleTimeout: number;
+  currentState: "on" | "off";
+}
+
 export default function MaintenancePanel() {
   const [isRunningMaintenance, setIsRunningMaintenance] =
     useState<boolean>(false);
@@ -49,6 +59,12 @@ export default function MaintenancePanel() {
   const [cableMode, setCableMode] = useState<"short" | "long" | null>(null);
   const [isManagingCableMode, setIsManagingCableMode] = useState<boolean>(false);
   const [cableModeResult, setCableModeResult] = useState<MaintenanceResult | null>(null);
+  
+  // USB Power settings state
+  const [usbPowerConfig, setUsbPowerConfig] = useState<UsbPowerConfig | null>(null);
+  const [isManagingUsbPower, setIsManagingUsbPower] = useState<boolean>(false);
+  const [usbPowerResult, setUsbPowerResult] = useState<MaintenanceResult | null>(null);
+
   const { printerStatus, updateStatus } = usePrinter();
 
   const cleaningOptions: CleaningOption[] = [
@@ -228,6 +244,7 @@ export default function MaintenancePanel() {
   useEffect(() => {
     fetchVirtualHereStatus();
     fetchCableModeStatus();
+    fetchUsbPowerConfig();
   }, []);
 
   const fetchVirtualHereStatus = async (): Promise<void> => {
@@ -305,6 +322,89 @@ export default function MaintenancePanel() {
       updateStatus({ status: "error", message: "USB Mode change failed" });
     } finally {
       setIsManagingCableMode(false);
+    }
+  };
+
+  const fetchUsbPowerConfig = async (): Promise<void> => {
+    try {
+      const response = await fetch("/api/maintenance/usb-power");
+      if (response.ok) {
+        const data = await response.json();
+        setUsbPowerConfig(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch USB power config:", error);
+    }
+  };
+
+  const saveUsbPowerConfig = async (updatedConfig: UsbPowerConfig): Promise<void> => {
+    setIsManagingUsbPower(true);
+    setUsbPowerResult(null);
+    try {
+      const response = await fetch("/api/maintenance/usb-power", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedConfig),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setUsbPowerConfig(result.config);
+        setUsbPowerResult({
+          success: true,
+          message: "USB power configuration saved successfully.",
+          timestamp: new Date(),
+        });
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to save USB power configuration");
+      }
+    } catch (error) {
+      console.error("Failed to save USB power config:", error);
+      setUsbPowerResult({
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to save configuration",
+        timestamp: new Date(),
+      });
+    } finally {
+      setIsManagingUsbPower(false);
+    }
+  };
+
+  const toggleUsbPowerState = async (action: "on" | "off"): Promise<void> => {
+    if (!confirm(`Are you sure you want to turn the USB port power ${action.toUpperCase()}?`)) {
+      return;
+    }
+    setIsManagingUsbPower(true);
+    setUsbPowerResult(null);
+    try {
+      const response = await fetch("/api/maintenance/usb-power", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setUsbPowerConfig(result.config);
+        setUsbPowerResult({
+          success: true,
+          message: result.message,
+          timestamp: new Date(),
+        });
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Failed to turn port ${action.toUpperCase()}`);
+      }
+    } catch (error) {
+      console.error(`Failed to change USB port power to ${action}:`, error);
+      setUsbPowerResult({
+        success: false,
+        message: error instanceof Error ? error.message : `Failed to change power to ${action}`,
+        timestamp: new Date(),
+      });
+    } finally {
+      setIsManagingUsbPower(false);
     }
   };
 
@@ -809,6 +909,170 @@ export default function MaintenancePanel() {
             )}
           </div>
         </div>
+
+        {/* USB Smart Power Management Section */}
+        {usbPowerConfig && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-6">
+            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-4">
+              <h2 className="text-xl font-semibold text-white flex items-center">
+                <Power className="mr-2" size={24} />
+                USB Power Management
+              </h2>
+              <p className="text-blue-100 mt-1">
+                Configure smart auto-power saving for USB hub / printer
+              </p>
+            </div>
+
+            <div className="p-6">
+              {usbPowerResult && (
+                <div
+                  className={`p-4 rounded-lg mb-4 ${
+                    usbPowerResult.success
+                      ? "bg-green-50 border-l-4 border-green-400"
+                      : "bg-red-50 border-l-4 border-red-400"
+                  }`}
+                >
+                  <div className="flex items-center">
+                    {usbPowerResult.success ? (
+                      <CheckCircle className="text-green-500 mr-3" size={20} />
+                    ) : (
+                      <AlertTriangle className="text-red-500 mr-3" size={20} />
+                    )}
+                    <div>
+                      <p
+                        className={`font-medium text-sm ${
+                          usbPowerResult.success
+                            ? "text-green-800"
+                            : "text-red-800"
+                        }`}
+                      >
+                        {usbPowerResult.message}
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        {usbPowerResult.timestamp.toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-gray-700 font-semibold">Current Port Power State:</span>
+                  <span
+                    className={`text-sm font-semibold px-3 py-1 rounded-full ${
+                      usbPowerConfig.currentState === "on"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
+                  >
+                    {usbPowerConfig.currentState === "on" ? "POWERED ON" : "POWERED OFF"}
+                  </span>
+                </div>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => toggleUsbPowerState("on")}
+                    disabled={isManagingUsbPower || usbPowerConfig.currentState === "on"}
+                    className={`flex-1 py-2 px-3 rounded-lg font-semibold text-xs transition-all duration-200 ${
+                      isManagingUsbPower || usbPowerConfig.currentState === "on"
+                        ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                        : "bg-green-600 hover:bg-green-700 text-white shadow-sm shadow-green-100"
+                    }`}
+                  >
+                    Force ON
+                  </button>
+                  <button
+                    onClick={() => toggleUsbPowerState("off")}
+                    disabled={isManagingUsbPower || usbPowerConfig.currentState === "off" || printerStatus.status !== "idle"}
+                    className={`flex-1 py-2 px-3 rounded-lg font-semibold text-xs transition-all duration-200 ${
+                      isManagingUsbPower || usbPowerConfig.currentState === "off" || printerStatus.status !== "idle"
+                        ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                        : "bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-100"
+                    }`}
+                  >
+                    Force OFF
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-150 pb-3">
+                  <div>
+                    <label className="font-semibold text-gray-800 block">Auto Power-Saving Mode</label>
+                    <span className="text-xs text-gray-500">Automatically powers ON/OFF the hub based on access</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={usbPowerConfig.enabled}
+                    onChange={(e) => {
+                      const updated = { ...usbPowerConfig, enabled: e.target.checked };
+                      setUsbPowerConfig(updated);
+                      saveUsbPowerConfig(updated);
+                    }}
+                    className="w-10 h-5 bg-gray-200 rounded-full appearance-none cursor-pointer checked:bg-blue-600 relative transition-all duration-200 after:content-[''] after:absolute after:w-5 after:h-5 after:bg-white after:rounded-full after:border after:border-gray-300 after:transition-all after:duration-200 checked:after:translate-x-5"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-600 block mb-1">USB Hub Location (-l)</label>
+                    <input
+                      type="text"
+                      value={usbPowerConfig.location}
+                      onChange={(e) => setUsbPowerConfig({ ...usbPowerConfig, location: e.target.value })}
+                      placeholder="e.g. 1-1"
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-600 block mb-1">USB Port Number (-p)</label>
+                    <input
+                      type="text"
+                      value={usbPowerConfig.port}
+                      onChange={(e) => setUsbPowerConfig({ ...usbPowerConfig, port: e.target.value })}
+                      placeholder="e.g. 3"
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Idle Timeout Threshold</label>
+                  <select
+                    value={usbPowerConfig.idleTimeout}
+                    onChange={(e) => {
+                      const updated = { ...usbPowerConfig, idleTimeout: Number(e.target.value) };
+                      setUsbPowerConfig(updated);
+                      saveUsbPowerConfig(updated);
+                    }}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-medium"
+                  >
+                    <option value={1}>1 Minute (Testing only)</option>
+                    <option value={5}>5 Minutes</option>
+                    <option value={10}>10 Minutes (Recommended)</option>
+                    <option value={15}>15 Minutes</option>
+                    <option value={30}>30 Minutes</option>
+                  </select>
+                </div>
+
+                <button
+                  onClick={() => saveUsbPowerConfig(usbPowerConfig)}
+                  disabled={isManagingUsbPower}
+                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition-all duration-150 flex items-center justify-center shadow-md hover:shadow-lg disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
+                >
+                  {isManagingUsbPower ? (
+                    <div className="animate-spin mr-2">
+                      <Settings size={16} />
+                    </div>
+                  ) : (
+                    <Save className="mr-2" size={16} />
+                  )}
+                  Save Hardware Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Existing Print Head Cleaning Section */}
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
