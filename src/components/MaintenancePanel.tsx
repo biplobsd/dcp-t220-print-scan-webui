@@ -46,6 +46,9 @@ export default function MaintenancePanel() {
   const [isManagingVirtualHere, setIsManagingVirtualHere] = useState<boolean>(false);
   const [virtualHereStatus, setVirtualHereStatus] = useState<VirtualHereStatus | null>(null);
   const [virtualHereResult, setVirtualHereResult] = useState<MaintenanceResult | null>(null);
+  const [cableMode, setCableMode] = useState<"short" | "long" | null>(null);
+  const [isManagingCableMode, setIsManagingCableMode] = useState<boolean>(false);
+  const [cableModeResult, setCableModeResult] = useState<MaintenanceResult | null>(null);
   const { printerStatus, updateStatus } = usePrinter();
 
   const cleaningOptions: CleaningOption[] = [
@@ -221,9 +224,10 @@ export default function MaintenancePanel() {
 
   const categories = getOptionsByCategory();
 
-  // Fetch VirtualHere status on component mount
+  // Fetch VirtualHere and Cable Mode status on component mount
   useEffect(() => {
     fetchVirtualHereStatus();
+    fetchCableModeStatus();
   }, []);
 
   const fetchVirtualHereStatus = async (): Promise<void> => {
@@ -235,6 +239,72 @@ export default function MaintenancePanel() {
       }
     } catch (error) {
       console.error("Failed to fetch VirtualHere status:", error);
+    }
+  };
+
+  const fetchCableModeStatus = async (): Promise<void> => {
+    try {
+      const response = await fetch("/api/maintenance/cable-speed");
+      if (response.ok) {
+        const data = await response.json();
+        setCableMode(data.mode);
+      }
+    } catch (error) {
+      console.error("Failed to fetch USB Cable Mode status:", error);
+    }
+  };
+
+  const manageCableMode = async (mode: "short" | "long"): Promise<void> => {
+    const modeName = mode === "long" ? "Stable Mode (Long Cable)" : "Standard Mode (Short Cable)";
+
+    if (
+      !confirm(
+        `Are you sure you want to switch to ${modeName}? This will temporarily restart the printer service.`
+      )
+    ) {
+      return;
+    }
+
+    setIsManagingCableMode(true);
+    setCableModeResult(null);
+
+    try {
+      updateStatus({
+        status: "maintenance",
+        message: `Switching to ${modeName}...`,
+      });
+
+      const response = await fetch("/api/maintenance/cable-speed", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mode }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setCableModeResult({
+          success: true,
+          message: result.message,
+          timestamp: new Date(),
+        });
+        updateStatus({ status: "idle", message: "Printer ready" });
+        setCableMode(mode);
+      } else {
+        const errorData: { error: string } = await response.json();
+        throw new Error(errorData.error || `Failed to switch to ${modeName}`);
+      }
+    } catch (error) {
+      console.error(`Failed to switch USB Connection Mode to ${modeName}:`, error);
+      setCableModeResult({
+        success: false,
+        message: `USB Connection Mode change failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        timestamp: new Date(),
+      });
+      updateStatus({ status: "error", message: "USB Mode change failed" });
+    } finally {
+      setIsManagingCableMode(false);
     }
   };
 
@@ -551,6 +621,188 @@ export default function MaintenancePanel() {
                 <p className="text-sm text-red-700 text-center">
                   <AlertTriangle className="inline mr-1" size={16} />
                   Printer must be idle to manage services. Current status:{" "}
+                  <span className="font-medium">{printerStatus.status}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* USB Connection Mode Section */}
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-6">
+          <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-4">
+            <h2 className="text-xl font-semibold text-white flex items-center">
+              <Zap className="mr-2" size={24} />
+              USB Connection Mode
+            </h2>
+            <p className="text-amber-100 mt-1">
+              Select mode based on your USB cable length/extender
+            </p>
+          </div>
+
+          <div className="p-6">
+            {cableModeResult && (
+              <div
+                className={`p-4 rounded-lg mb-4 ${
+                  cableModeResult.success
+                    ? "bg-green-50 border-l-4 border-green-400"
+                    : "bg-red-50 border-l-4 border-red-400"
+                }`}
+              >
+                <div className="flex items-center">
+                  {cableModeResult.success ? (
+                    <CheckCircle className="text-green-500 mr-3" size={20} />
+                  ) : (
+                    <AlertTriangle className="text-red-500 mr-3" size={20} />
+                  )}
+                  <div>
+                    <p
+                      className={`font-medium text-sm ${
+                        cableModeResult.success
+                          ? "text-green-800"
+                          : "text-red-800"
+                      }`}
+                    >
+                      {cableModeResult.message}
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {cableModeResult.timestamp.toLocaleTimeString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {cableMode && (
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <h4 className="font-semibold text-gray-800 mb-3">Current Connection Status</h4>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-700 flex items-center">
+                    <Zap className="mr-2" size={16} />
+                    Connection Speed Mode
+                  </span>
+                  <span
+                    className={`text-sm font-semibold px-3 py-1 rounded-full ${
+                      cableMode === "short"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-amber-100 text-amber-700"
+                    }`}
+                  >
+                    {cableMode === "short"
+                      ? "High-Speed (Short Cable)"
+                      : "Stable Mode (Long Cable)"}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Notifications based on selected mode */}
+            {cableMode === "long" ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start">
+                  <AlertTriangle
+                    className="text-amber-500 mr-3 flex-shrink-0 mt-0.5"
+                    size={20}
+                  />
+                  <div>
+                    <h4 className="font-medium text-amber-900 mb-1">
+                      Stable Mode (Long Cable) Active
+                    </h4>
+                    <p className="text-sm text-amber-800 leading-relaxed">
+                      <strong>Low-speed connection mode is active. The document scanner is disabled to maintain printing stability over the long-distance cable extension.</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : cableMode === "short" ? (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start">
+                  <CheckCircle
+                    className="text-green-500 mr-3 flex-shrink-0 mt-0.5"
+                    size={20}
+                  />
+                  <div>
+                    <h4 className="font-medium text-green-900 mb-1">
+                      Standard Mode Active
+                    </h4>
+                    <p className="text-sm text-green-800 leading-relaxed">
+                      <strong>High-speed connection mode is active. Both printing and scanning are fully operational.</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <div className="flex items-start">
+                <Info
+                  className="text-blue-500 mr-3 flex-shrink-0 mt-0.5"
+                  size={20}
+                />
+                <div>
+                  <h4 className="font-medium text-blue-900 mb-1">
+                    When to use Stable Mode?
+                  </h4>
+                  <p className="text-sm text-blue-800">
+                    If you are using a cheap USB extender, active booster cable, or RJ45 LAN USB extender, standard scanner requests will time out and lock up the printer. Stable Mode prevents these lockups by disabling scanner capabilities.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex space-x-3">
+              <button
+                onClick={() => manageCableMode("short")}
+                disabled={
+                  isManagingCableMode ||
+                  cableMode === "short" ||
+                  printerStatus.status !== "idle"
+                }
+                className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
+                  isManagingCableMode ||
+                  cableMode === "short" ||
+                  printerStatus.status !== "idle"
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300"
+                    : "bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg"
+                }`}
+              >
+                {isManagingCableMode && cableMode === "short" ? (
+                  <div className="animate-spin mr-2">
+                    <Settings size={16} />
+                  </div>
+                ) : null}
+                High-Speed Mode
+              </button>
+
+              <button
+                onClick={() => manageCableMode("long")}
+                disabled={
+                  isManagingCableMode ||
+                  cableMode === "long" ||
+                  printerStatus.status !== "idle"
+                }
+                className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
+                  isManagingCableMode ||
+                  cableMode === "long" ||
+                  printerStatus.status !== "idle"
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300"
+                    : "bg-amber-500 hover:bg-amber-600 text-white shadow-md hover:shadow-lg"
+                }`}
+              >
+                {isManagingCableMode && cableMode === "long" ? (
+                  <div className="animate-spin mr-2">
+                    <Settings size={16} />
+                  </div>
+                ) : null}
+                Stable Mode (Long)
+              </button>
+            </div>
+
+            {printerStatus.status !== "idle" && !isManagingCableMode && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-700 text-center">
+                  <AlertTriangle className="inline mr-1" size={16} />
+                  Printer must be idle to switch connection modes. Current status:{" "}
                   <span className="font-medium">{printerStatus.status}</span>
                 </p>
               </div>
