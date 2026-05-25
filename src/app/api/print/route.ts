@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     lpArgs.push("-t", `"${sanitizedFileName}"`);
 
-    lpArgs.push(tempFilePath);
+    lpArgs.push(`"${tempFilePath}"`);
 
     const lpCommand = `lp ${lpArgs.join(" ")}`;
     console.log("Executing print command:", lpCommand);

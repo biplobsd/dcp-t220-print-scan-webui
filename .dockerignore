@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.idea
+.vscode
+*.tar
+*.md
+Dockerfile
+deploy.ps1
+package-lock.json
