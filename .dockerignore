@@ -1,5 +1,4 @@
 node_modules
-.next
 .git
 .idea
 .vscode
@@ -8,3 +7,8 @@ node_modules
 Dockerfile
 deploy.ps1
 package-lock.json
+
+# Ignore everything in .next except the standalone build and static assets
+.next/*
+!.next/standalone
+!.next/static

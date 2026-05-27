@@ -53,7 +53,7 @@ class UsbPowerManager {
             return;
           }
 
-          await execAsync(`sudo /home/pi/uhubctl/uhubctl -l ${config.location} -p ${config.port} -a 1`);
+          await execAsync(`/usr/local/sbin/uhubctl -l ${config.location} -p ${config.port} -a 1`);
           this.lastTransitionTime = Date.now();
           this.wakingUpUntil = Date.now() + 5000; // Allow 5 seconds for printer to boot up
           console.log("[USB Power Manager] Port powered ON successfully.");
@@ -100,7 +100,7 @@ class UsbPowerManager {
           }
 
           console.log(`[USB Power Manager] Idle timeout reached (${config.idleTimeout} mins). Powering OFF port ${config.port}...`);
-          await execAsync(`sudo /home/pi/uhubctl/uhubctl -l ${config.location} -p ${config.port} -a 0`);
+          await execAsync(`/usr/local/sbin/uhubctl -l ${config.location} -p ${config.port} -a 0`);
           this.lastTransitionTime = Date.now();
           console.log("[USB Power Manager] Port powered OFF successfully.");
         }
@@ -123,7 +123,7 @@ class UsbPowerManager {
 
   private async getActualState(location: string, port: string): Promise<"on" | "off"> {
     try {
-      const { stdout } = await execAsync(`sudo /home/pi/uhubctl/uhubctl -l ${location} -p ${port}`);
+      const { stdout } = await execAsync(`/usr/local/sbin/uhubctl -l ${location} -p ${port}`);
       const portLine = stdout.split("\n").find((line) => line.includes(`Port ${port}:`));
       if (portLine && portLine.toLowerCase().includes("off")) {
         return "off";
@@ -326,6 +326,25 @@ async function getPrinterStatus(cupsJobs: CupsJob[]) {
   });
 }
 
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage = "Request timed out"): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, timeoutMs);
+
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 export async function GET() {
   const powerManager = UsbPowerManager.getInstance();
   await powerManager.tick();
@@ -355,13 +374,16 @@ export async function GET() {
 
   const cupsJobs = await getCupsJobs();
   try {
-    const printerStatus = await getPrinterStatus(cupsJobs);
+    const printerStatus = await withTimeout(getPrinterStatus(cupsJobs), 5000, "Printer status query timed out");
     return NextResponse.json(printerStatus);
   } catch (error) {
     const err = error as { code?: string; message?: string };
     const isConnRefused = err && err.code === "ECONNREFUSED";
+    const isTimeout = err && err.message === "Printer status query timed out";
     if (isConnRefused) {
       console.warn(`[Printer Status] Printer is offline (Connection refused at ${env.PRINTER_IPP})`);
+    } else if (isTimeout) {
+      console.warn(`[Printer Status] Printer status query timed out (exceeded 5000ms)`);
     } else {
       console.error("Error getting printer status:", error);
     }
@@ -369,6 +391,8 @@ export async function GET() {
       status: "error",
       message: isConnRefused
         ? "Printer offline"
+        : isTimeout
+        ? "Printer offline (Timeout)"
         : `Failed to communicate with printer: ${err?.message || String(error)}`,
       progress: 0,
       inkLevels: { black: 0, cyan: 0, magenta: 0, yellow: 0 },
@@ -389,3 +413,4 @@ export async function GET() {
     });
   }
 }
+

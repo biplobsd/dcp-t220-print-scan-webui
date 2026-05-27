@@ -38,6 +38,7 @@ interface PrinterStatus {
   printerAlertDescription: string;
   mediaReady: string[];
   lastUpdated: string;
+  isLoading: boolean;
 }
 
 interface PrinterContextType {
@@ -52,20 +53,20 @@ const PrinterContext = createContext<PrinterContextType | undefined>(undefined);
 export function PrinterProvider({ children }: { children: ReactNode }) {
   const [printerStatus, setPrinterStatus] = useState<PrinterStatus>({
     status: "idle",
-    message: "Printer ready",
+    message: "Connecting to printer...",
     progress: 0,
     inkLevels: {
-      black: 85,
-      cyan: 72,
-      magenta: 68,
-      yellow: 91,
+      black: 0,
+      cyan: 0,
+      magenta: 0,
+      yellow: 0,
     },
     jobQueue: [],
     printerState: "unknown",
     printerStateReasons: "none",
-    isAcceptingJobs: true,
+    isAcceptingJobs: false,
     printerName: "Loading...",
-    printerInfo: "Loading printer information...",
+    printerInfo: "Connecting to printer...",
     printerLocation: "",
     printerModel: "",
     printerUpTime: 0,
@@ -73,7 +74,8 @@ export function PrinterProvider({ children }: { children: ReactNode }) {
     printerAlert: "",
     printerAlertDescription: "",
     mediaReady: [],
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: "",
+    isLoading: true,
   });
 
   const updateStatus = (status: Partial<PrinterStatus>) => {
@@ -105,17 +107,24 @@ export function PrinterProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    const fetchStatus = async () => {
       try {
         const response = await fetch("/api/status");
         if (response.ok) {
           const data = await response.json();
-          updateStatus(data);
+          setPrinterStatus((prev) => ({ ...prev, ...data, isLoading: false }));
+        } else {
+          setPrinterStatus((prev) => ({ ...prev, isLoading: false }));
         }
       } catch (error) {
         console.error("Failed to fetch status:", error);
+        setPrinterStatus((prev) => ({ ...prev, isLoading: false }));
       }
-    }, 3000);
+    };
+
+    fetchStatus();
+
+    const interval = setInterval(fetchStatus, 3000);
 
     return () => clearInterval(interval);
   }, []);

@@ -66,6 +66,7 @@ export default function MaintenancePanel() {
   const [usbPowerResult, setUsbPowerResult] = useState<MaintenanceResult | null>(null);
 
   const { printerStatus, updateStatus } = usePrinter();
+  const isBusy = printerStatus.status === "printing" || printerStatus.status === "scanning" || printerStatus.status === "maintenance";
 
   const cleaningOptions: CleaningOption[] = [
     {
@@ -716,7 +717,7 @@ export default function MaintenancePanel() {
               </button>
             </div>
 
-            {printerStatus.status !== "idle" && !isManagingVirtualHere && (
+            {isBusy && !isManagingVirtualHere && (
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-sm text-red-700 text-center">
                   <AlertTriangle className="inline mr-1" size={16} />
@@ -856,12 +857,12 @@ export default function MaintenancePanel() {
                 disabled={
                   isManagingCableMode ||
                   cableMode === "short" ||
-                  printerStatus.status !== "idle"
+                  isBusy
                 }
                 className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
                   isManagingCableMode ||
                   cableMode === "short" ||
-                  printerStatus.status !== "idle"
+                  isBusy
                     ? "bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300"
                     : "bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg"
                 }`}
@@ -879,12 +880,12 @@ export default function MaintenancePanel() {
                 disabled={
                   isManagingCableMode ||
                   cableMode === "long" ||
-                  printerStatus.status !== "idle"
+                  isBusy
                 }
                 className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
                   isManagingCableMode ||
                   cableMode === "long" ||
-                  printerStatus.status !== "idle"
+                  isBusy
                     ? "bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300"
                     : "bg-amber-500 hover:bg-amber-600 text-white shadow-md hover:shadow-lg"
                 }`}
@@ -898,7 +899,7 @@ export default function MaintenancePanel() {
               </button>
             </div>
 
-            {printerStatus.status !== "idle" && !isManagingCableMode && (
+            {isBusy && !isManagingCableMode && (
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-sm text-red-700 text-center">
                   <AlertTriangle className="inline mr-1" size={16} />
@@ -983,9 +984,9 @@ export default function MaintenancePanel() {
                   </button>
                   <button
                     onClick={() => toggleUsbPowerState("off")}
-                    disabled={isManagingUsbPower || usbPowerConfig.currentState === "off" || printerStatus.status !== "idle"}
+                    disabled={isManagingUsbPower || usbPowerConfig.currentState === "off" || isBusy}
                     className={`flex-1 py-2 px-3 rounded-lg font-semibold text-xs transition-all duration-200 ${
-                      isManagingUsbPower || usbPowerConfig.currentState === "off" || printerStatus.status !== "idle"
+                      isManagingUsbPower || usbPowerConfig.currentState === "off" || isBusy
                         ? "bg-gray-200 text-gray-400 cursor-not-allowed"
                         : "bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-100"
                     }`}

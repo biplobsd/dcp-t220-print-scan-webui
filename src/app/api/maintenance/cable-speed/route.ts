@@ -55,30 +55,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let writeCommand = "";
     if (mode === "long") {
       // Long Cable / Stable Mode: disable scanner to prevent loops
-      writeCommand = `printf "[*]\\n  # Drop Connection: header by default\\n  http-connection = \\"\\"\\n  usb-max-interfaces = 1\\n" | sudo tee ${QUIRKS_FILE}`;
+      const content = "[*]\n  # Drop Connection: header by default\n  http-connection = \"\"\n  usb-max-interfaces = 1\n";
+      await fs.writeFile(QUIRKS_FILE, content, "utf-8");
     } else {
       // Short Cable / Standard Mode: enable printing and scanning
-      writeCommand = `printf "[*]\\n  # Drop Connection: header by default\\n  http-connection = \\"\\"\\n" | sudo tee ${QUIRKS_FILE}`;
+      const content = "[*]\n  # Drop Connection: header by default\n  http-connection = \"\"\n";
+      await fs.writeFile(QUIRKS_FILE, content, "utf-8");
     }
 
-    // 1. Write the new quirks file
-    await execAsync(writeCommand);
-
     // 2. Stop ipp-usb service
-    await execAsync("sudo systemctl stop ipp-usb.service");
+    await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop ipp-usb.service");
 
     // 3. Try to hard power-cycle the USB port to clean-boot the printer USB stack (optional/robust)
     try {
-      await execAsync("sudo /home/pi/uhubctl/uhubctl -l 1-1 -p 3 -a 0 && sleep 1 && sudo /home/pi/uhubctl/uhubctl -l 1-1 -p 3 -a 1");
+      await execAsync("/usr/local/sbin/uhubctl -l 1-1 -p 3 -a 0 && sleep 1 && /usr/local/sbin/uhubctl -l 1-1 -p 3 -a 1");
     } catch (uhubctlError) {
       console.warn("Optional USB port power-cycle skipped/failed:", uhubctlError);
     }
 
     // 4. Start ipp-usb service
-    await execAsync("sudo systemctl start ipp-usb.service");
+    await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start ipp-usb.service");
 
     return NextResponse.json({
       success: true,

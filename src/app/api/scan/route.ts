@@ -10,7 +10,7 @@ import { env } from "@/env";
 
 const exec = promisify(execCb);
 
-const TEMP_DIR = path.join(os.tmpdir(), env.SCAN_TEMP_DIR_NAME);
+const TEMP_DIR = path.join(/*turbopackIgnore: true*/ os.tmpdir(), env.SCAN_TEMP_DIR_NAME);
 
 async function ensureTempDir() {
   try {
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const jobId = uuidv4();
     const isPdf = settings.format === "pdf";
-    const outputFile = path.join(TEMP_DIR, `${jobId}.${isPdf ? "pdf" : "jpg"}`);
+    const outputFile = path.join(/*turbopackIgnore: true*/ TEMP_DIR, `${jobId}.${isPdf ? "pdf" : "jpg"}`);
 
     const resolutionMap = {
       draft: "150",
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       throw new Error("Scanned file is empty");
     }
 
-    const metadataFile = path.join(TEMP_DIR, `${jobId}.json`);
+    const metadataFile = path.join(/*turbopackIgnore: true*/ TEMP_DIR, `${jobId}.json`);
     await fs.writeFile(
       metadataFile,
       JSON.stringify({

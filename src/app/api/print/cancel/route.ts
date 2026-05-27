@@ -16,9 +16,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid jobId format" }, { status: 400 });
     }
 
-    // Run cancel command using sudo
-    console.log(`Executing: sudo cancel ${jobId}`);
-    const { stdout, stderr } = await execAsync(`sudo cancel ${jobId}`);
+    // Run cancel command directly as root runner
+    console.log(`Executing: cancel ${jobId}`);
+    const { stdout, stderr } = await execAsync(`cancel ${jobId}`);
     console.log(`Cancelled job ${jobId} successfully:`, { stdout, stderr });
 
     return NextResponse.json({

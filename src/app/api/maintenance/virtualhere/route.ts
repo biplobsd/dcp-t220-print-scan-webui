@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "start") {
       // Start VirtualHere service
-      await execAsync("sudo systemctl start virtualhere.service");
+      await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start virtualhere.service");
 
       return NextResponse.json({
         success: true,
@@ -26,8 +26,8 @@ export async function POST(request: NextRequest) {
       });
     } else if (action === "stop") {
       // Stop VirtualHere service and restart IPP-USB service
-      await execAsync("sudo systemctl stop virtualhere.service");
-      await execAsync("sudo systemctl restart ipp-usb.service");
+      await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop virtualhere.service");
+      await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl restart ipp-usb.service");
 
       return NextResponse.json({
         success: true,
@@ -53,7 +53,7 @@ export async function GET() {
     const getServiceStatus = async (serviceName: string) => {
       try {
         const { stdout } = await execAsync(
-          `sudo systemctl is-active ${serviceName}`
+          `nsenter -t 1 -m -u -i -n -p -r -- systemctl is-active ${serviceName}`
         );
         return stdout.trim();
       } catch (error) {

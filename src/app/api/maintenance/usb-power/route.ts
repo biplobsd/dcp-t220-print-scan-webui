@@ -46,7 +46,7 @@ async function getActualPortState(location: string, port: string): Promise<"on" 
     if (!/^[a-zA-Z0-9_-]+$/.test(location) || !/^[0-9]+$/.test(port)) {
       return "on";
     }
-    const { stdout } = await execAsync(`sudo /home/pi/uhubctl/uhubctl -l ${location} -p ${port}`);
+    const { stdout } = await execAsync(`/usr/local/sbin/uhubctl -l ${location} -p ${port}`);
     // Check if the specific port line contains "off"
     const portLine = stdout.split("\n").find((line) => line.includes(`Port ${port}:`));
     if (portLine && portLine.toLowerCase().includes("off")) {
@@ -115,8 +115,8 @@ export async function POST(request: NextRequest) {
 
       // Execute power command
       const powerState = action === "on" ? "1" : "0";
-      console.log(`Executing safety USB power control: sudo /home/pi/uhubctl/uhubctl -l ${config.location} -p ${config.port} -a ${powerState}`);
-      await execAsync(`sudo /home/pi/uhubctl/uhubctl -l ${config.location} -p ${config.port} -a ${powerState}`);
+      console.log(`Executing safety USB power control: /usr/local/sbin/uhubctl -l ${config.location} -p ${config.port} -a ${powerState}`);
+      await execAsync(`/usr/local/sbin/uhubctl -l ${config.location} -p ${config.port} -a ${powerState}`);
       
       lastTransitionTime = now;
       config.currentState = action;
