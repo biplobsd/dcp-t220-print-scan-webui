@@ -13,6 +13,7 @@ interface UsbPowerConfig {
   port: string;
   idleTimeout: number; // in minutes
   currentState: "on" | "off";
+  hotspotLinkEnabled: boolean;
 }
 
 const DEFAULT_CONFIG: UsbPowerConfig = {
@@ -21,6 +22,7 @@ const DEFAULT_CONFIG: UsbPowerConfig = {
   port: "3",
   idleTimeout: 10,
   currentState: "on",
+  hotspotLinkEnabled: true,
 };
 
 // Simple global memory variables to enforce safety cooldowns
@@ -72,16 +74,32 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let bodyText = "";
+    try {
+      bodyText = await request.text();
+    } catch (readErr) {
+      console.error("[USB Power API] Failed to read request body as text:", readErr);
+    }
+    
+    let body: any = {};
+    if (bodyText) {
+      try {
+        body = JSON.parse(bodyText);
+      } catch (parseErr) {
+        console.error(`[USB Power API] JSON parsing failed for raw body: "${bodyText}". Error:`, parseErr);
+        throw parseErr;
+      }
+    }
     const config = await readConfig();
 
-    const { enabled, location, port, idleTimeout, action } = body;
+    const { enabled, location, port, idleTimeout, action, hotspotLinkEnabled } = body;
 
     // 1. Update basic settings
     if (enabled !== undefined) config.enabled = Boolean(enabled);
     if (location !== undefined && /^[a-zA-Z0-9_-]+$/.test(location)) config.location = String(location);
     if (port !== undefined && /^[0-9]+$/.test(port)) config.port = String(port);
     if (idleTimeout !== undefined && !isNaN(Number(idleTimeout))) config.idleTimeout = Number(idleTimeout);
+    if (hotspotLinkEnabled !== undefined) config.hotspotLinkEnabled = Boolean(hotspotLinkEnabled);
 
     let transitionMessage = "";
 
@@ -121,6 +139,29 @@ export async function POST(request: NextRequest) {
       lastTransitionTime = now;
       config.currentState = action;
       transitionMessage = `Port ${config.port} successfully powered ${action.toUpperCase()}.`;
+
+      // Smart Hotspot Linkage: Automatically start/stop hotspot when USB power changes
+      if (config.hotspotLinkEnabled) {
+        if (action === "on") {
+          console.log("[USB Power API] Hotspot Link Active: Printer detected (USB ON). Automatically turning ON WiFi hotspot...");
+          try {
+            await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start hostapd.service");
+            await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start dnsmasq.service");
+            transitionMessage += " WiFi Hotspot started automatically.";
+          } catch (hotspotErr) {
+            console.error("[USB Power API] Failed to start WiFi hotspot services:", hotspotErr);
+          }
+        } else if (action === "off") {
+          console.log("[USB Power API] Hotspot Link Active: USB powered OFF. Automatically turning OFF WiFi hotspot...");
+          try {
+            await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop hostapd.service");
+            await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop dnsmasq.service");
+            transitionMessage += " WiFi Hotspot stopped automatically.";
+          } catch (hotspotErr) {
+            console.error("[USB Power API] Failed to stop WiFi hotspot services:", hotspotErr);
+          }
+        }
+      }
     }
 
     await writeConfig(config);

@@ -43,6 +43,18 @@ interface UsbPowerConfig {
   port: string;
   idleTimeout: number;
   currentState: "on" | "off";
+  hotspotLinkEnabled: boolean;
+}
+
+interface HotspotStatus {
+  hostapd: {
+    status: string;
+    isActive: boolean;
+  };
+  dnsmasq: {
+    status: string;
+    isActive: boolean;
+  };
 }
 
 export default function MaintenancePanel() {
@@ -64,6 +76,11 @@ export default function MaintenancePanel() {
   const [usbPowerConfig, setUsbPowerConfig] = useState<UsbPowerConfig | null>(null);
   const [isManagingUsbPower, setIsManagingUsbPower] = useState<boolean>(false);
   const [usbPowerResult, setUsbPowerResult] = useState<MaintenanceResult | null>(null);
+
+  // WiFi Hotspot state
+  const [hotspotStatus, setHotspotStatus] = useState<HotspotStatus | null>(null);
+  const [isManagingHotspot, setIsManagingHotspot] = useState<boolean>(false);
+  const [hotspotResult, setHotspotResult] = useState<MaintenanceResult | null>(null);
 
   const { printerStatus, updateStatus } = usePrinter();
   const isBusy = printerStatus.status === "printing" || printerStatus.status === "scanning" || printerStatus.status === "maintenance";
@@ -241,11 +258,12 @@ export default function MaintenancePanel() {
 
   const categories = getOptionsByCategory();
 
-  // Fetch VirtualHere and Cable Mode status on component mount
+  // Fetch VirtualHere, Cable Mode, USB Power, and WiFi Hotspot status on component mount
   useEffect(() => {
     fetchVirtualHereStatus();
     fetchCableModeStatus();
     fetchUsbPowerConfig();
+    fetchHotspotStatus();
   }, []);
 
   const fetchVirtualHereStatus = async (): Promise<void> => {
@@ -466,6 +484,78 @@ export default function MaintenancePanel() {
       updateStatus({ status: "error", message: "Service management failed" });
     } finally {
       setIsManagingVirtualHere(false);
+    }
+  };
+
+  const fetchHotspotStatus = async (): Promise<void> => {
+    try {
+      const response = await fetch("/api/maintenance/hotspot");
+      if (response.ok) {
+        const data = await response.json();
+        setHotspotStatus(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch WiFi Hotspot status:", error);
+    }
+  };
+
+  const manageHotspotService = async (action: "start" | "stop"): Promise<void> => {
+    const actionText = action === "start" ? "starting" : "stopping";
+
+    if (
+      !confirm(
+        `Are you sure you want to ${action} the WiFi Hotspot service?${
+          action === "stop" ? " This will temporarily stop wlan0 access point." : ""
+        }`
+      )
+    ) {
+      return;
+    }
+
+    setIsManagingHotspot(true);
+    setHotspotResult(null);
+
+    try {
+      updateStatus({
+        status: "maintenance",
+        message: `${actionText.charAt(0).toUpperCase() + actionText.slice(1)} WiFi Hotspot...`,
+      });
+
+      const response = await fetch("/api/maintenance/hotspot", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setHotspotResult({
+          success: true,
+          message: result.message,
+          timestamp: new Date(),
+        });
+        updateStatus({ status: "idle", message: "Printer ready" });
+
+        // Refresh status after action
+        setTimeout(() => {
+          fetchHotspotStatus();
+        }, 1000);
+      } else {
+        const errorData: { error: string } = await response.json();
+        throw new Error(errorData.error || `Failed to ${action} WiFi Hotspot service`);
+      }
+    } catch (error) {
+      console.error(`WiFi Hotspot service ${action} failed:`, error);
+      setHotspotResult({
+        success: false,
+        message: `WiFi Hotspot ${action} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        timestamp: new Date(),
+      });
+      updateStatus({ status: "error", message: "WiFi Hotspot action failed" });
+    } finally {
+      setIsManagingHotspot(false);
     }
   };
 
@@ -1014,6 +1104,23 @@ export default function MaintenancePanel() {
                   />
                 </div>
 
+                <div className="flex items-center justify-between border-b border-gray-150 pb-3">
+                  <div>
+                    <label className="font-semibold text-gray-800 block">Link WiFi Hotspot</label>
+                    <span className="text-xs text-gray-500">Automatically turns ON WiFi Hotspot when printer is detected (USB ON)</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={usbPowerConfig.hotspotLinkEnabled}
+                    onChange={(e) => {
+                      const updated = { ...usbPowerConfig, hotspotLinkEnabled: e.target.checked };
+                      setUsbPowerConfig(updated);
+                      saveUsbPowerConfig(updated);
+                    }}
+                    className="w-10 h-5 bg-gray-200 rounded-full appearance-none cursor-pointer checked:bg-blue-600 relative transition-all duration-200 after:content-[''] after:absolute after:w-5 after:h-5 after:bg-white after:rounded-full after:border after:border-gray-300 after:transition-all after:duration-200 checked:after:translate-x-5"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-semibold text-gray-600 block mb-1">USB Hub Location (-l)</label>
@@ -1074,6 +1181,174 @@ export default function MaintenancePanel() {
             </div>
           </div>
         )}
+
+        {/* WiFi Hotspot Management Section */}
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-6">
+          <div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4">
+            <h2 className="text-xl font-semibold text-white flex items-center">
+              <Wifi className="mr-2" size={24} />
+              WiFi Hotspot Management
+            </h2>
+            <p className="text-teal-100 mt-1">
+              Control the local network Wi-Fi access point
+            </p>
+          </div>
+
+          <div className="p-6">
+            {hotspotResult && (
+              <div
+                className={`p-4 rounded-lg mb-4 ${
+                  hotspotResult.success
+                    ? "bg-green-50 border-l-4 border-green-400"
+                    : "bg-red-50 border-l-4 border-red-400"
+                }`}
+              >
+                <div className="flex items-center">
+                  {hotspotResult.success ? (
+                    <CheckCircle className="text-green-500 mr-3" size={20} />
+                  ) : (
+                    <AlertTriangle className="text-red-500 mr-3" size={20} />
+                  )}
+                  <div>
+                    <p
+                      className={`font-medium text-sm ${
+                        hotspotResult.success
+                          ? "text-green-800"
+                          : "text-red-800"
+                      }`}
+                    >
+                      {hotspotResult.message}
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {hotspotResult.timestamp.toLocaleTimeString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {hotspotStatus && (
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <h4 className="font-semibold text-gray-800 mb-3">Service Status</h4>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-700 flex items-center">
+                      <Wifi className="mr-2" size={16} />
+                      hostapd (Access Point)
+                    </span>
+                    <div className="flex items-center">
+                      <div
+                        className={`w-3 h-3 rounded-full mr-2 ${
+                          hotspotStatus.hostapd.isActive
+                            ? "bg-green-500"
+                            : "bg-red-500"
+                        }`}
+                      ></div>
+                      <span
+                        className={`text-sm font-medium ${
+                          hotspotStatus.hostapd.isActive
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {hotspotStatus.hostapd.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-700 flex items-center">
+                      <Server className="mr-2" size={16} />
+                      dnsmasq (DHCP & DNS)
+                    </span>
+                    <div className="flex items-center">
+                      <div
+                        className={`w-3 h-3 rounded-full mr-2 ${
+                          hotspotStatus.dnsmasq.isActive
+                            ? "bg-green-500"
+                            : "bg-red-500"
+                        }`}
+                      ></div>
+                      <span
+                        className={`text-sm font-medium ${
+                          hotspotStatus.dnsmasq.isActive
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {hotspotStatus.dnsmasq.status}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <div className="flex items-start">
+                <Info
+                  className="text-blue-500 mr-3 flex-shrink-0 mt-0.5"
+                  size={20}
+                />
+                <div>
+                  <h4 className="font-medium text-blue-900 mb-1">
+                    Direct Printing Information
+                  </h4>
+                  <p className="text-sm text-blue-800">
+                    Running the WiFi hotspot lets phones and computers connect directly to the printer interface without needing external networks or routers.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex space-x-3">
+              <button
+                onClick={() => manageHotspotService("start")}
+                disabled={
+                  isManagingHotspot ||
+                  hotspotStatus?.hostapd.isActive
+                }
+                className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
+                  isManagingHotspot ||
+                  hotspotStatus?.hostapd.isActive
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-teal-600 hover:bg-teal-700 text-white shadow-lg hover:shadow-xl"
+                }`}
+              >
+                {isManagingHotspot ? (
+                  <div className="animate-spin mr-2">
+                    <Settings size={16} />
+                  </div>
+                ) : (
+                  <Play className="mr-2" size={16} />
+                )}
+                Start Hotspot
+              </button>
+
+              <button
+                onClick={() => manageHotspotService("stop")}
+                disabled={
+                  isManagingHotspot ||
+                  !hotspotStatus?.hostapd.isActive
+                }
+                className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center ${
+                  isManagingHotspot ||
+                  !hotspotStatus?.hostapd.isActive
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-red-600 hover:bg-red-700 text-white shadow-lg hover:shadow-xl"
+                }`}
+              >
+                {isManagingHotspot ? (
+                  <div className="animate-spin mr-2">
+                    <Settings size={16} />
+                  </div>
+                ) : (
+                  <Square className="mr-2" size={16} />
+                )}
+                Stop Hotspot
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* Existing Print Head Cleaning Section */}
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">

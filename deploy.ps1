@@ -61,7 +61,7 @@ ssh ${PI_USER}@${PI_HOST} "
     --pid host \
     -v /var/run/cups/cups.sock:/var/run/cups/cups.sock \
     -v /dev/bus/usb:/dev/bus/usb \
-    -v /home/pi/production/dcp-t220-print-scan-webui/usb-power.json:/app/usb-power.json \
+    -v /portainer/Files/AppData/Config/brother-printer/usb-power.json:/app/usb-power.json \
     --restart unless-stopped \
     print-scan-webui:latest && \
   echo 'Container print-scan-webui started successfully!'

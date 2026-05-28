@@ -57,6 +57,17 @@ class UsbPowerManager {
           this.lastTransitionTime = Date.now();
           this.wakingUpUntil = Date.now() + 5000; // Allow 5 seconds for printer to boot up
           console.log("[USB Power Manager] Port powered ON successfully.");
+
+          // Smart Hotspot Linkage: Automatically turn ON WiFi hotspot when printer is detected (USB ON)
+          if (config.hotspotLinkEnabled) {
+            console.log("[USB Power Manager] Hotspot Link Active: Printer detected (USB ON). Automatically turning ON WiFi hotspot...");
+            try {
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start hostapd.service");
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start dnsmasq.service");
+            } catch (hotspotErr) {
+              console.error("[USB Power Manager] Failed to automatically start WiFi hotspot:", hotspotErr);
+            }
+          }
         }
       }
     } catch (err) {
@@ -103,6 +114,17 @@ class UsbPowerManager {
           await execAsync(`/usr/local/sbin/uhubctl -l ${config.location} -p ${config.port} -a 0`);
           this.lastTransitionTime = Date.now();
           console.log("[USB Power Manager] Port powered OFF successfully.");
+
+          // Smart Hotspot Linkage: Automatically turn OFF WiFi hotspot when printer goes idle (USB OFF)
+          if (config.hotspotLinkEnabled) {
+            console.log("[USB Power Manager] Hotspot Link Active: USB powered OFF. Automatically turning OFF WiFi hotspot...");
+            try {
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop hostapd.service");
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop dnsmasq.service");
+            } catch (hotspotErr) {
+              console.error("[USB Power Manager] Failed to automatically stop WiFi hotspot:", hotspotErr);
+            }
+          }
         }
       }
     } catch (err) {
@@ -112,12 +134,12 @@ class UsbPowerManager {
     }
   }
 
-  private async readConfig() {
+  public async readConfig() {
     try {
       const data = await fs.readFile(CONFIG_PATH, "utf-8");
-      return JSON.parse(data);
+      return { hotspotLinkEnabled: true, ...JSON.parse(data) };
     } catch {
-      return { enabled: false, location: "1-1", port: "3", idleTimeout: 10 };
+      return { enabled: false, location: "1-1", port: "3", idleTimeout: 10, hotspotLinkEnabled: true };
     }
   }
 
@@ -345,9 +367,24 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage = "
   });
 }
 
+async function isServiceActive(serviceName: string): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync(`nsenter -t 1 -m -u -i -n -p -r -- systemctl is-active ${serviceName}`);
+    return stdout.trim() === "active";
+  } catch (err) {
+    const errorTyped = err as { stdout?: string };
+    if (errorTyped.stdout && errorTyped.stdout.trim() === "active") {
+      return true;
+    }
+    return false;
+  }
+}
+
 export async function GET() {
   const powerManager = UsbPowerManager.getInstance();
   await powerManager.tick();
+
+  const config = await powerManager.readConfig();
 
   if (powerManager.isWakingUp()) {
     return NextResponse.json({
@@ -374,7 +411,52 @@ export async function GET() {
 
   const cupsJobs = await getCupsJobs();
   try {
-    const printerStatus = await withTimeout(getPrinterStatus(cupsJobs), 5000, "Printer status query timed out");
+    const printerStatus = await withTimeout(getPrinterStatus(cupsJobs), 5000, "Printer status query timed out") as any;
+    
+    // Automatically manage WiFi hotspot based on whether the printer is actually online and detected
+    const reasons = String(printerStatus.printerStateReasons || "").toLowerCase();
+    const isPrinterOffline = 
+      printerStatus.status === "error" ||
+      printerStatus.printerState === "unknown" ||
+      reasons.includes("offline") ||
+      reasons.includes("connecting-to-device") ||
+      reasons.includes("cups-waiting-for-device");
+
+    if (config.hotspotLinkEnabled) {
+      const isHostapdActive = await isServiceActive("hostapd.service");
+      const isDnsmasqActive = await isServiceActive("dnsmasq.service");
+
+      if (!isPrinterOffline) {
+        if (!isHostapdActive || !isDnsmasqActive) {
+          console.log("[Printer Status Trigger] Printer is online and detected. Automatically turning ON WiFi hotspot...");
+          try {
+            if (!isHostapdActive) {
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start hostapd.service");
+            }
+            if (!isDnsmasqActive) {
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl start dnsmasq.service");
+            }
+          } catch (hotspotErr) {
+            console.error("[Printer Status Trigger] Failed to automatically turn ON WiFi hotspot:", hotspotErr);
+          }
+        }
+      } else {
+        if (isHostapdActive || isDnsmasqActive) {
+          console.log("[Printer Status Trigger] Printer is offline or disconnected (status/state check). Automatically turning OFF WiFi hotspot...");
+          try {
+            if (isHostapdActive) {
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop hostapd.service");
+            }
+            if (isDnsmasqActive) {
+              await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop dnsmasq.service");
+            }
+          } catch (hotspotErr) {
+            console.error("[Printer Status Trigger] Failed to automatically turn OFF WiFi hotspot:", hotspotErr);
+          }
+        }
+      }
+    }
+
     return NextResponse.json(printerStatus);
   } catch (error) {
     const err = error as { code?: string; message?: string };
@@ -387,6 +469,27 @@ export async function GET() {
     } else {
       console.error("Error getting printer status:", error);
     }
+
+    // Automatically turn OFF WiFi hotspot when printer is disconnected or goes offline
+    if (config.hotspotLinkEnabled) {
+      const isHostapdActive = await isServiceActive("hostapd.service");
+      const isDnsmasqActive = await isServiceActive("dnsmasq.service");
+
+      if (isHostapdActive || isDnsmasqActive) {
+        console.log("[Printer Status Trigger] Printer offline or disconnected. Automatically turning OFF WiFi hotspot...");
+        try {
+          if (isHostapdActive) {
+            await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop hostapd.service");
+          }
+          if (isDnsmasqActive) {
+            await execAsync("nsenter -t 1 -m -u -i -n -p -r -- systemctl stop dnsmasq.service");
+          }
+        } catch (hotspotErr) {
+          console.error("[Printer Status Trigger] Failed to automatically turn OFF WiFi hotspot:", hotspotErr);
+        }
+      }
+    }
+
     return NextResponse.json({
       status: "error",
       message: isConnRefused
